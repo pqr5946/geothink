@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>GeoThink-10 Mission</title>
+  <meta name="theme-color" content="#1e3a8a">
+  
+  <!-- 절대 주소가 깨지지 않도록 보호된 클린 코드입니다 -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-200">
+  <div id="root"></div>
+
+  <!-- 여기서부터 실제 앱 작동 코드입니다 -->
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const Icon = ({ children, className = "w-6 h-6" }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+    );
+
+    const Icons = {
+      Play: (props) => <Icon {...props}><polygon points="5 3 19 12 5 21 5 3" /></Icon>,
+      Edit: (props) => <Icon {...props}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></Icon>,
+      Eraser: (props) => <Icon {...props}><path d="M20 20H7L3 16C2.5 15.5 2.5 14.5 3 14L13 4C13.5 3.5 14.5 3.5 15 4L20 9C20.5 9.5 20.5 10.5 20 11L11 20H20V20Z"/></Icon>,
+      Lightbulb: (props) => <Icon {...props}><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5z"/></Icon>,
+      Clock: (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></Icon>,
+      CheckCircle: (props) => <Icon {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></Icon>,
+      ChevronRight: (props) => <Icon {...props}><polyline points="9 18 15 12 9 6"/></Icon>,
+      BarChart: (props) => <Icon {...props}><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></Icon>,
+      RotateCcw: (props) => <Icon {...props}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></Icon>,
+      AlertCircle: (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></Icon>
+    };
+
+    const problems = [
+      { id: 1, type: '대칭', text: '다음 도형의 선대칭 도형을 완성하세요.' },
+      { id: 2, type: '각도추론', text: '삼각형의 두 각이 40°, 60°일 때, 나머지 한 각은?' },
+      { id: 3, type: '접기추론', text: '직사각형을 대각선으로 접었을 때 생기는 겹치는 각의 크기를 구하세요.' },
+      { id: 4, type: '닮음', text: '두 삼각형의 닮음비가 1:2일 때, 넓이의 비는?' }
+    ];
+
+    function App() {
+      const [currentScreen, setCurrentScreen] = useState('start');
+      const [currentProblemIdx, setCurrentProblemIdx] = useState(0);
+      const [answerInput, setAnswerInput] = useState('');
+      const [interventionMode, setInterventionMode] = useState('W'); 
+      const [seekTimer, setSeekTimer] = useState(10);
+      const [teachingUsed, setTeachingUsed] = useState(false);
+      const [logs, setLogs] = useState([]);
+      const [wrongRepeat, setWrongRepeat] = useState(0);
+      const [inactivityMs, setInactivityMs] = useState(0);
+      const [totalInterventions, setTotalInterventions] = useState(0);
+      
+      const canvasRef = useRef(null);
+      const isDrawing = useRef(false);
+      const lastActionTime = useRef(Date.now());
+      const inactivityInterval = useRef(null);
+
+      const addLog = useCallback((type, detail = '') => {
+        setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), type, detail, problemId: currentProblemIdx + 1 }]);
+        lastActionTime.current = Date.now();
+        setInactivityMs(0);
+      }, [currentProblemIdx]);
+
+      useEffect(() => {
+        if (currentScreen === 'solving' && interventionMode === 'W') {
+          lastActionTime.current = Date.now();
+          inactivityInterval.current = setInterval(() => {
+            const ms = Date.now() - lastActionTime.current;
+            setInactivityMs(ms);
+            if (ms >= 30000) { // 30초 대기
+              addLog('intervention_coaching', '정지 30초 초과 (STUCK)');
+              setInterventionMode('C_ASK');
+              setSeekTimer(10);
+              setTotalInterventions(prev => prev + 1);
+              clearInterval(inactivityInterval.current);
+            }
+          }, 1000);
+        }
+        return () => clearInterval(inactivityInterval.current);
+      }, [currentScreen, interventionMode, currentProblemIdx]);
+
+      const triggerTeaching = () => {
+        addLog('intervention_teaching', '원리 카드 제공');
+        setInterventionMode('T');
+        setTeachingUsed(true);
+        setTotalInterventions(prev => prev + 2);
+      };
+
+      const handleHintClick = () => {
+        addLog('hint_click', '의존 성향 감지');
+        if (!teachingUsed && wrongRepeat >= 1) {
+          triggerTeaching();
+        } else {
+          addLog('intervention_coaching', '힌트 의존 (DEPEND)');
+          setInterventionMode('C_ASK');
+          setSeekTimer(10);
+          setTotalInterventions(prev => prev + 1);
+        }
+      };
+
+      const drawBaseFigure = useCallback((ctx, idx) => {
+        ctx.save();
+        ctx.strokeStyle = '#1f2937'; 
+        ctx.fillStyle = '#f3f4f6'; 
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (idx === 0) {
+          ctx.setLineDash([10, 10]); ctx.lineWidth = 2; ctx.strokeStyle = '#9ca3af';
+          ctx.beginPath(); ctx.moveTo(450, 40); ctx.lineTo(450, 360); ctx.stroke();
+          ctx.setLineDash([]); ctx.lineWidth = 4; ctx.strokeStyle = '#1f2937'; ctx.fillStyle = '#e5e7eb';
+          ctx.beginPath(); ctx.moveTo(450, 80); ctx.lineTo(320, 180); ctx.lineTo(390, 180); ctx.lineTo(390, 320); ctx.lineTo(450, 320); ctx.stroke(); ctx.fill();
+        } else if (idx === 1) {
+          ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(250, 320); ctx.lineTo(650, 320); ctx.lineTo(400, 100); ctx.closePath(); ctx.stroke();
+          ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#374151'; ctx.fillText('60°', 310, 300); ctx.fillText('40°', 560, 300);
+          ctx.fillStyle = '#ef4444'; ctx.fillText('?', 400, 150);
+        } else if (idx === 2) {
+          ctx.lineWidth = 3; ctx.strokeRect(250, 100, 400, 200);
+          ctx.setLineDash([8, 8]); ctx.strokeStyle = '#6b7280'; ctx.beginPath(); ctx.moveTo(250, 300); ctx.lineTo(650, 100); ctx.stroke();
+          ctx.setLineDash([]); ctx.font = '18px sans-serif'; ctx.fillStyle = '#6b7280'; ctx.fillText('접는 선', 430, 210);
+        } else if (idx === 3) {
+          ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(250, 280); ctx.lineTo(350, 280); ctx.lineTo(300, 180); ctx.closePath(); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(450, 280); ctx.lineTo(650, 280); ctx.lineTo(550, 80); ctx.closePath(); ctx.stroke();
+        }
+        ctx.restore();
+      }, []);
+
+      const initCanvas = useCallback(() => {
+        if (!canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawBaseFigure(ctx, currentProblemIdx);
+      }, [currentProblemIdx, drawBaseFigure]);
+
+      useEffect(() => {
+        if (currentScreen === 'solving') setTimeout(() => initCanvas(), 50); 
+      }, [currentScreen, currentProblemIdx, initCanvas]);
+
+      const handleClearClick = () => { initCanvas(); addLog('erase', '지우개 사용 (초기화)'); };
+
+      const getCoordinates = (e) => {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        let clientX = e.clientX; let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+      };
+
+      const startDrawing = (e) => {
+        isDrawing.current = true;
+        if (!canvasRef.current) return;
+        const ctx = canvasRef.current.getContext('2d');
+        const coords = getCoordinates(e);
+        ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#3b82f6'; ctx.setLineDash([]); 
+        ctx.beginPath(); ctx.moveTo(coords.x, coords.y);
+        lastActionTime.current = Date.now(); setInactivityMs(0);
+      };
+
+      const draw = (e) => {
+        if (!isDrawing.current || interventionMode !== 'W' || !canvasRef.current) return;
+        const ctx = canvasRef.current.getContext('2d');
+        const coords = getCoordinates(e);
+        ctx.lineTo(coords.x, coords.y); ctx.stroke();
+        lastActionTime.current = Date.now(); setInactivityMs(0);
+      };
+
+      const stopDrawing = () => {
+        if (isDrawing.current) addLog('stroke', '그리기 완료');
+        isDrawing.current = false;
+      };
+
+      useEffect(() => {
+        if (interventionMode === 'C_ASK') {
+          const timer = setInterval(() => {
+            setSeekTimer(prev => {
+              if (prev <= 1) { setInterventionMode('C_SEEK'); clearInterval(timer); return 0; }
+              return prev - 1;
+            });
+          }, 1000);
+          return () => clearInterval(timer);
+        }
+      }, [interventionMode]);
+
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-gray-200 p-2 sm:p-4 font-sans text-gray-800">
+          <div className="w-full max-w-6xl h-[90vh] min-h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            
+            <div className="flex justify-center bg-gray-900 text-white p-3 space-x-4">
+              <button className={`px-4 py-2 rounded-md ${currentScreen !== 'dashboard' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => setCurrentScreen('start')}>학습자 화면</button>
+              <button className={`px-4 py-2 rounded-md ${currentScreen === 'dashboard' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => setCurrentScreen('dashboard')}>관리자 화면</button>
+            </div>
+
+            {currentScreen === 'start' && (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                <div className="w-24 h-24 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6"><Icons.Play className="w-12 h-12 ml-2" /></div>
+                <h1 className="text-3xl font-bold mb-4">GeoThink-10 미션</h1>
+                <p className="text-gray-600 mb-8">수학 도형·추론 (대칭/접기/닮음)</p>
+                <div className="bg-yellow-100 p-4 rounded-xl mb-8 shadow-sm">
+                  <p className="font-bold flex items-center justify-center text-yellow-800"><Icons.CheckCircle className="w-5 h-5 mr-2" /> "막혔을 때 10초만 더 생각하고 스스로 질문해보기"</p>
+                </div>
+                <button onClick={() => { setCurrentScreen('solving'); addLog('session_start'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-full font-bold text-xl flex items-center shadow-lg">
+                  10분 미션 시작하기 <Icons.ChevronRight className="w-6 h-6 ml-2" />
+                </button>
+              </div>
+            )}
+
+            {currentScreen === 'solving' && (
+              <div className="flex-1 flex flex-col md:flex-row relative bg-gray-50">
+                <div className="w-full md:w-80 lg:w-96 p-6 flex flex-col border-b md:border-b-0 md:border-r border-gray-200 bg-white z-10 shadow-sm h-full overflow-y-auto">
+                  <div className="flex justify-between items-center mb-6">
+                    <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-bold shadow-sm">Q{currentProblemIdx + 1}/{problems.length}</span>
+                    <span className="font-bold text-gray-700">{problems[currentProblemIdx].type}</span>
+                  </div>
+                  <h2 className="text-xl lg:text-2xl font-bold text-gray-800 mb-6 leading-relaxed">{problems[currentProblemIdx].text}</h2>
+                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-sm font-bold text-gray-600">AI 튜터 개입 상태</span>
+                      <div className="px-2 py-1 bg-white rounded-md text-xs flex items-center shadow-sm border border-gray-200">
+                        <span className={`w-2 h-2 rounded-full mr-2 ${interventionMode === 'W' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                        {interventionMode}
+                      </div>
+                    </div>
+                    <button onClick={handleHintClick} className="w-full flex justify-center items-center text-orange-600 bg-orange-50 border border-orange-200 px-4 py-2.5 rounded-lg hover:bg-orange-100 font-bold">
+                      <Icons.Lightbulb className="w-5 h-5 mr-2" /> 힌트 요청
+                    </button>
+                  </div>
+                  <div className="flex-1"></div>
+                  <div className="mt-auto pt-4 border-t border-gray-100 flex flex-col space-y-3">
+                    <label className="text-sm font-bold text-gray-600">정답 제출</label>
+                    <input type="text" value={answerInput} onChange={(e) => setAnswerInput(e.target.value)} placeholder="정답 텍스트 입력 (선택)" className="w-full p-4 border-2 border-gray-200 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-lg" />
+                    <button onClick={() => {
+                        addLog('submit_attempt');
+                        if (wrongRepeat < 1 && currentProblemIdx === 2) { setWrongRepeat(prev => prev + 1); alert("오답입니다. 다시 생각해보세요."); }
+                        else if (currentProblemIdx < problems.length - 1) { setCurrentProblemIdx(prev => prev + 1); setAnswerInput(''); setWrongRepeat(0); setTeachingUsed(false); }
+                        else { addLog('session_end'); setCurrentScreen('report'); }
+                      }} className="bg-gray-900 hover:bg-gray-800 text-white px-6 py-4 rounded-xl font-bold text-lg shadow-md">
+                      제출
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 p-4 lg:p-6 flex flex-col h-full bg-gray-100 relative min-h-[400px]">
+                  <div className="flex-1 bg-white border-2 border-blue-200 rounded-2xl relative overflow-hidden shadow-sm flex flex-col">
+                    <div className="absolute top-4 left-4 bg-gray-800/80 text-white px-4 py-2 rounded-lg text-sm flex items-center z-10 shadow-md pointer-events-none"><Icons.Edit className="w-4 h-4 mr-2" /> 마우스나 터치로 그려보세요</div>
+                    <button onClick={handleClearClick} className="absolute top-4 right-4 p-3 bg-white border border-gray-200 rounded-lg text-gray-700 shadow-md z-10"><Icons.Eraser className="w-5 h-5" /></button>
+                    <canvas ref={canvasRef} width={900} height={600} className="w-full h-full cursor-crosshair touch-none bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]" onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseOut={stopDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing} />
+                  </div>
+                </div>
+
+                {interventionMode.startsWith('C_') && (
+                  <div className="absolute inset-0 bg-gray-900/60 flex items-center justify-center z-20 p-4">
+                    <div className="bg-white p-6 rounded-2xl w-full max-w-md shadow-2xl border-t-8 border-blue-500">
+                      <div className="flex items-center text-blue-600 font-bold mb-4 bg-blue-50 p-2 rounded-lg w-fit"><Icons.AlertCircle className="w-5 h-5 mr-2"/> 코칭 시스템 개입</div>
+                      <h3 className="text-xl font-bold mb-5 text-gray-800">"지금 이 도형에서 변하지 않는 것 1가지만 말해볼래?"</h3>
+                      {interventionMode === 'C_ASK' ? (
+                        <div className="bg-gray-100 p-4 rounded-xl flex items-center text-gray-700 border border-gray-200"><Icons.Clock className="w-6 h-6 mr-3 text-blue-500" /> <span className="font-medium text-lg">{seekTimer}초</span>만 더 스스로 생각해보자.</div>
+                      ) : (
+                        <div className="space-y-3 mt-4">
+                          <p className="text-sm font-bold text-gray-500 uppercase">힌트 행동 (Knock)</p>
+                          <button onClick={() => { addLog('knock_selected', '대칭축 긋기'); setInterventionMode('W'); }} className="w-full bg-blue-50 text-blue-700 p-4 rounded-xl font-bold border border-blue-200 flex items-center"><span className="text-xl mr-3">💡</span> 대칭축(회전 중심)을 한 줄만 그어봐.</button>
+                          <button onClick={() => { addLog('intervention_end', '물러남'); setInterventionMode('W'); }} className="w-full p-3 text-gray-500 rounded-xl font-medium">다시 혼자 풀게요</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {interventionMode === 'T' && (
+                  <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center z-20 p-4">
+                    <div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl border-t-8 border-orange-500 text-center">
+                      <div className="bg-orange-100 text-orange-700 px-4 py-1.5 rounded-full text-sm font-bold inline-block mb-6 shadow-sm">Teaching 원리 카드</div>
+                      <h3 className="text-2xl font-black mb-6 text-gray-800">"접기는 '겹쳐지는 점'이 같아진다."</h3>
+                      <button onClick={() => { addLog('principle_card_close'); setInterventionMode('W'); }} className="w-full bg-orange-500 text-white p-4 rounded-xl font-bold text-lg shadow-md">이해했습니다 (다시 풀기)</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentScreen === 'report' && (
+              <div className="flex-1 p-8 bg-gray-50 overflow-auto">
+                <h2 className="text-3xl font-bold mb-8 flex items-center text-gray-800"><Icons.CheckCircle className="w-10 h-10 text-green-500 mr-3"/> 세션 학습 리포트</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center flex flex-col justify-center"><div className="text-sm text-gray-500 font-medium mb-2">사고력 지수 (SMI)</div><div className="text-5xl font-black text-blue-600">85<span className="text-2xl text-blue-400 ml-1">pt</span></div></div>
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center flex flex-col justify-center"><div className="text-sm text-gray-500 font-medium mb-2">개입 횟수</div><div className="text-5xl font-black text-orange-500">{totalInterventions}<span className="text-2xl text-orange-400 ml-1">회</span></div></div>
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center flex flex-col justify-center"><div className="text-sm text-gray-500 font-medium mb-2">스스로 회복</div><div className="text-5xl font-black text-green-500">{logs.filter(l => l.type === 'knock_selected').length}<span className="text-2xl text-green-400 ml-1">회</span></div></div>
+                </div>
+                <button onClick={() => { setLogs([]); setCurrentProblemIdx(0); setCurrentScreen('start'); }} className="mt-8 flex items-center justify-center w-full bg-gray-100 text-gray-700 p-4 rounded-xl font-bold"><Icons.RotateCcw className="w-5 h-5 mr-2" /> 처음으로 돌아가기</button>
+              </div>
+            )}
+
+            {currentScreen === 'dashboard' && (
+              <div className="flex-1 p-8 bg-gray-100 overflow-auto">
+                <h2 className="text-3xl font-bold mb-2 flex items-center text-gray-800"><Icons.BarChart className="w-8 h-8 text-indigo-600 mr-3"/> 기관용 실증 대시보드</h2>
+                <p className="text-gray-500 mb-8 font-medium">관리자용 화면입니다.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
