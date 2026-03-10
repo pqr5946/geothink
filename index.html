@@ -4,9 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>GeoThink-10 Mission</title>
+  <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#1e3a8a">
   
-  <!-- 절대 주소가 깨지지 않도록 보호된 클린 코드입니다 -->
+  <!-- 프로그램 설치 없이 웹에서 바로 React와 Tailwind를 불러오는 스크립트 (주소 오류 완벽 수정본) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -33,7 +34,8 @@
       ChevronRight: (props) => <Icon {...props}><polyline points="9 18 15 12 9 6"/></Icon>,
       BarChart: (props) => <Icon {...props}><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></Icon>,
       RotateCcw: (props) => <Icon {...props}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></Icon>,
-      AlertCircle: (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></Icon>
+      AlertCircle: (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></Icon>,
+      Share: (props) => <Icon {...props}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></Icon> // 공유 아이콘 추가
     };
 
     const problems = [
@@ -66,6 +68,7 @@
         setInactivityMs(0);
       }, [currentProblemIdx]);
 
+      // --- 30초 STUCK 감지 로직 ---
       useEffect(() => {
         if (currentScreen === 'solving' && interventionMode === 'W') {
           lastActionTime.current = Date.now();
@@ -103,6 +106,38 @@
         }
       };
 
+      // --- 데이터 공유(카카오톡 전송) 함수 ---
+      const handleShareData = () => {
+        const recoveryCount = logs.filter(l => l.type === 'knock_selected').length;
+        
+        // 전송할 텍스트 만들기
+        let reportText = `[GeoThink-10 실증 데이터]\n`;
+        reportText += `- 사고력 지수 (SMI): 85 pt\n`;
+        reportText += `- AI 개입 횟수: ${totalInterventions} 회\n`;
+        reportText += `- 스스로 회복: ${recoveryCount} 회\n\n`;
+        reportText += `[타임라인 로그]\n`;
+        
+        logs.forEach(log => {
+          reportText += `${log.time} | ${log.type} | ${log.detail || ''}\n`;
+        });
+
+        // 스마트폰의 공유(Share) 기능 호출
+        if (navigator.share) {
+          navigator.share({
+            title: 'GeoThink 실증 데이터',
+            text: reportText
+          }).then(() => {
+            console.log('공유 성공');
+          }).catch((error) => console.log('공유 취소 또는 에러', error));
+        } else {
+          // PC 등 공유 기능을 지원하지 않는 브라우저일 경우 클립보드에 복사
+          navigator.clipboard.writeText(reportText).then(() => {
+            alert('✅ 데이터가 클립보드에 복사되었습니다!\n카카오톡 PC버전 등에서 붙여넣기(Ctrl+V) 해주세요.');
+          });
+        }
+      };
+
+      // --- 캔버스 및 그리기 함수들 ---
       const drawBaseFigure = useCallback((ctx, idx) => {
         ctx.save();
         ctx.strokeStyle = '#1f2937'; 
@@ -189,15 +224,18 @@
         }
       }, [interventionMode]);
 
+      // --- 화면 렌더링 ---
       return (
         <div className="flex items-center justify-center min-h-screen bg-gray-200 p-2 sm:p-4 font-sans text-gray-800">
           <div className="w-full max-w-6xl h-[90vh] min-h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             
+            {/* 상단 탭 */}
             <div className="flex justify-center bg-gray-900 text-white p-3 space-x-4">
               <button className={`px-4 py-2 rounded-md ${currentScreen !== 'dashboard' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => setCurrentScreen('start')}>학습자 화면</button>
               <button className={`px-4 py-2 rounded-md ${currentScreen === 'dashboard' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => setCurrentScreen('dashboard')}>관리자 화면</button>
             </div>
 
+            {/* 시작 화면 */}
             {currentScreen === 'start' && (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
                 <div className="w-24 h-24 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6"><Icons.Play className="w-12 h-12 ml-2" /></div>
@@ -212,6 +250,7 @@
               </div>
             )}
 
+            {/* 문제 풀이 화면 */}
             {currentScreen === 'solving' && (
               <div className="flex-1 flex flex-col md:flex-row relative bg-gray-50">
                 <div className="w-full md:w-80 lg:w-96 p-6 flex flex-col border-b md:border-b-0 md:border-r border-gray-200 bg-white z-10 shadow-sm h-full overflow-y-auto">
@@ -254,6 +293,7 @@
                   </div>
                 </div>
 
+                {/* AI 코칭 및 티칭 팝업 */}
                 {interventionMode.startsWith('C_') && (
                   <div className="absolute inset-0 bg-gray-900/60 flex items-center justify-center z-20 p-4">
                     <div className="bg-white p-6 rounded-2xl w-full max-w-md shadow-2xl border-t-8 border-blue-500">
@@ -283,18 +323,29 @@
               </div>
             )}
 
+            {/* 결과 리포트 화면 */}
             {currentScreen === 'report' && (
               <div className="flex-1 p-8 bg-gray-50 overflow-auto">
                 <h2 className="text-3xl font-bold mb-8 flex items-center text-gray-800"><Icons.CheckCircle className="w-10 h-10 text-green-500 mr-3"/> 세션 학습 리포트</h2>
+                
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center flex flex-col justify-center"><div className="text-sm text-gray-500 font-medium mb-2">사고력 지수 (SMI)</div><div className="text-5xl font-black text-blue-600">85<span className="text-2xl text-blue-400 ml-1">pt</span></div></div>
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center flex flex-col justify-center"><div className="text-sm text-gray-500 font-medium mb-2">개입 횟수</div><div className="text-5xl font-black text-orange-500">{totalInterventions}<span className="text-2xl text-orange-400 ml-1">회</span></div></div>
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center flex flex-col justify-center"><div className="text-sm text-gray-500 font-medium mb-2">스스로 회복</div><div className="text-5xl font-black text-green-500">{logs.filter(l => l.type === 'knock_selected').length}<span className="text-2xl text-green-400 ml-1">회</span></div></div>
                 </div>
-                <button onClick={() => { setLogs([]); setCurrentProblemIdx(0); setCurrentScreen('start'); }} className="mt-8 flex items-center justify-center w-full bg-gray-100 text-gray-700 p-4 rounded-xl font-bold"><Icons.RotateCcw className="w-5 h-5 mr-2" /> 처음으로 돌아가기</button>
+                
+                {/* 데이터 공유 버튼 (카카오톡 연동용) */}
+                <button onClick={handleShareData} className="mt-4 flex items-center justify-center w-full bg-[#FEE500] text-[#191919] hover:bg-[#F4DC00] p-4 rounded-xl font-bold shadow-md transition-colors text-lg">
+                  <Icons.Share className="w-6 h-6 mr-3" /> 데이터 카카오톡으로 전송하기
+                </button>
+
+                <button onClick={() => { setLogs([]); setCurrentProblemIdx(0); setCurrentScreen('start'); }} className="mt-4 flex items-center justify-center w-full bg-gray-100 text-gray-700 p-4 rounded-xl font-bold hover:bg-gray-200 transition-colors">
+                  <Icons.RotateCcw className="w-5 h-5 mr-2" /> 처음으로 돌아가기
+                </button>
               </div>
             )}
 
+            {/* 대시보드 화면 */}
             {currentScreen === 'dashboard' && (
               <div className="flex-1 p-8 bg-gray-100 overflow-auto">
                 <h2 className="text-3xl font-bold mb-2 flex items-center text-gray-800"><Icons.BarChart className="w-8 h-8 text-indigo-600 mr-3"/> 기관용 실증 대시보드</h2>
@@ -308,6 +359,15 @@
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
+  </script>
+
+  <!-- 서비스 워커 등록 (PWA용) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js');
+      });
+    }
   </script>
 </body>
 </html>
